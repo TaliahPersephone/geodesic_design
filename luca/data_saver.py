@@ -4,7 +4,6 @@ import numpy as np
 
 
 def save_log(log, save_path):
-    print(log)
     data_dict = {
         "sample": np.ones(log['n_epoch'], dtype=int),
         "steps": np.arange(0, log['n_epoch']),
