@@ -42,7 +42,6 @@ def commuting_ansatz(target_unitary, basis, projected_indices):
 
 
 def construct_commuting_ansatz_matrix(params, sols):
-    # params = [h for h in h_params if h]
     mat = np.zeros((len(params), len(params)))
     for j, h in enumerate(params):
         if h:
