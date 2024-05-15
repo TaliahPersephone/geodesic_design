@@ -1,14 +1,13 @@
-from jax.config import config
+from jax import config
 import numpy as np
-
-config.update("jax_enable_x64", True)
 import scipy.optimize as spo
-
 import jax
 import jax.numpy as jnp
+from gnd.lie import Hamiltonian
+from gnd.utils import golden_section_search, commuting_ansatz, prepare_random_parameters
 
-from .lie import Hamiltonian
-from .utils import golden_section_search, commuting_ansatz, prepare_random_parameters
+
+config.update("jax_enable_x64", True)
 
 
 # Roeland: One thing I recently learned is that you want to make sure that jitted functions are pure functions that
@@ -104,7 +103,7 @@ class Optimizer:
         self.free_indices_small[locs] = 1
         # Get the matrix that gives us the projection parameters within the projected space
         self.commuting_ansatz_matrix_free = self.commuting_ansatz_matrix[self.projected_indices, :][:,
-                                            self.projected_indices]
+                                                                                                    self.projected_indices]
         # Initialize variables
         if init_parameters is None:
             self.init_parameters = prepare_random_parameters(self.free_indices, self.commuting_ansatz_matrix, spread=0.01)
@@ -163,12 +162,13 @@ class Optimizer:
 
         # Step 3: Find a linear combination of Omegas that gives the geodesic and update parameters
         temp_coeffs = Optimizer.linear_comb_projected_coeffs(omega_phis, gamma.parameters, self.free_indices_small,
-                                                      self.commuting_ansatz_matrix_free)
+                                                             self.commuting_ansatz_matrix_free)
         # Expand the coefficients
 
         if temp_coeffs is None:
             print(
-                f"[{step_count[0]}/{step_count[1]}] Didn't find coefficients for Omega direction; restarting...                                                    ",
+                f"[{step_count[0]}/{step_count[1]
+                                    }] Didn't find coefficients for Omega direction; restarting...                                                    ",
                 end="\r")
             random_parameters = prepare_random_parameters(self.free_indices, self.commuting_ansatz_matrix)
 
@@ -190,11 +190,13 @@ class Optimizer:
                 f"[{step_count[0]}/{step_count[1]}] [Fidelity = {fidelity_new_phi}] A solution!                                                                     ")
         elif (fidelity_new_phi > fidelity_phi) and not np.isclose(fidelity_new_phi, fidelity_phi, atol=(1 - self.precision) / 100):
             print(
-                f"[{step_count[0]}/{step_count[1]}] [Fidelity = {fidelity_new_phi}] Omega geodesic gave a positive fidelity update for this step...                 ",
+                f"[{step_count[0]}/{step_count[1]
+                                    }] [Fidelity = {fidelity_new_phi}] Omega geodesic gave a positive fidelity update for this step...                 ",
                 end="\r")
         else:
             print(
-                f"[{step_count[0]}/{step_count[1]}] [Fidelity = {fidelity_phi}] Omega geodesic gave a negative fidelity update for this step. Moving phi away...    ",
+                f"[{step_count[0]}/{step_count[1]
+                                    }] [Fidelity = {fidelity_phi}] Omega geodesic gave a negative fidelity update for this step. Moving phi away...    ",
                 end="\r")
             proj_c = prepare_random_parameters(self.free_indices, self.commuting_ansatz_matrix)
 
@@ -232,12 +234,12 @@ class Optimizer:
 
     def _new_phi_golden_section_search(self, phi_ham, coeffs, step_size):
         fidelity_phi = phi_ham.fidelity(self.target_unitary)
-        f = lambda x: self.fidelity(x, phi_ham.parameters[self.projected_indices], coeffs[self.projected_indices])
+        def f(x): return self.fidelity(x, phi_ham.parameters[self.projected_indices], coeffs[self.projected_indices])
         epsilon, fidelity_new_phi = golden_section_search(f, -step_size, 0, tol=1e-5)
         new_phi_ham = Hamiltonian(self.full_basis, phi_ham.parameters + (epsilon * coeffs))
         return fidelity_phi, fidelity_new_phi, new_phi_ham, epsilon
 
-    def _new_phi_full(self, phi_ham, coeffs, step_size): #TODO could jitify this but probably not necessary
+    def _new_phi_full(self, phi_ham, coeffs, step_size):  # TODO could jitify this but probably not necessary
         delta_phi = step_size * coeffs
         new_phi_minus = Hamiltonian(self.full_basis, phi_ham.parameters - delta_phi)
         new_phi_plus = Hamiltonian(self.full_basis, phi_ham.parameters + delta_phi)

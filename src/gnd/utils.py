@@ -2,7 +2,7 @@ import numpy as np
 import scipy.linalg as spla
 import sympy
 
-from . import lie
+from gnd import lie
 
 invphi = (np.sqrt(5) - 1) / 2  # 1 / phi
 invphi2 = (3 - np.sqrt(5)) / 2  # 1 / phi^2

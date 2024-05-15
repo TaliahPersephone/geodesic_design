@@ -1,9 +1,10 @@
-import numpy as np
-from src import basis, optimize, data
 import argparse
-from src.configs import *
+import numpy as np
+from gnd import basis, optimize, data
+from gnd.configs import *
 
-if __name__ == "__main__":
+
+def main():
     parser = argparse.ArgumentParser(description='Set parameters')
     parser.add_argument('--instance', default=3)
     parser.add_argument('--gate', default='w4px')
