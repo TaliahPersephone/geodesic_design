@@ -1,0 +1,46 @@
+[project]
+name="gnd"
+dynamic=["version"]
+dependencies=[
+    "scipy==1.13.0",
+    "pandas==2.2.2",
+    "matplotlib==3.8.4",
+    "jax==0.4.28",
+    "jaxlib==0.4.28",
+    "sympy==1.12",
+]
+authors=[
+    {name = "Dylan Lewis"},
+    {name = "Roeland Wiersema"},
+    {name = "Taliah Horner", email = "taliahhorner@protonmail.com"}
+]
+description="Unitary gate design using a geodesic algorithm - see https://arxiv.org/abs/2401.05973."
+keywords=["geodesic", "unitary gate design", "quantum", "Riemannian geometry"]
+
+[project.optional-dependencies]
+dev = [
+    "commitizen>=3.13.0",
+    "pytest>=7.4.4",
+    "pytest-cov>=4.1.0"
+]
+
+[project.scripts]
+geodesic_unitary_design = "gnd.cli:main"
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.coverage.run]
+omit = [
+    "*__init__.py",
+    "tests/*"
+]
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+tag_format = "$version"
+version_scheme = "pep440"
+version_provider = "pep621"
+update_changelog_on_bump = true
+major_version_zero = true
