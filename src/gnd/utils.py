@@ -1,3 +1,6 @@
+# utils.py
+""" This modules contains utility functions for the gnd package. """
+from functools import reduce
 import numpy as np
 import scipy.linalg as spla
 import sympy
@@ -53,10 +56,8 @@ def remove_solution_free_parameters(params, sols):
 
 
 def multikron(matrices):
-    product = matrices[0]
-    for mat in matrices[1:]:
-        product = np.kron(product, mat)
-    return product
+    """ Return Kronecker product of matrices in a list. """
+    return reduce(np.kron, matrices)
 
 
 def golden_section_search(f, a, b, tol=1e-5):
