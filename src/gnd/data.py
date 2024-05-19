@@ -1,14 +1,15 @@
+# data.py
+""" This module contains a class for handling optimization data. """
 import os
-import ast
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
 
-class OptimizationData:
+class OptimizationDataHandler:
     """
     Data handling object for saving, loading, and plotting optimizer data
-    
+
     Parameters
     ----------
     target_unitary : optimize.Optimizer
@@ -16,14 +17,15 @@ class OptimizationData:
 
     Attributes
     ----------
-    config : Config
-        Configuration class object that determines how to save and load optimisation data
-    folder : Str, default="data"
+    config : dict
+        dict of values to include in the filename that determines how to save and load optimisation data
+    folder : str, default="data"
         Main folder to save the data
-    extension : Str, default="csv"
+    extension : str, default="csv"
         File extension of the saved data
-    """    
-    def __init__(self, config, optimizers=[], load_data=True, folder="data", extension="csv"):
+    """
+
+    def __init__(self, optimizers=None, load_data=True, folder="data", extension="csv", **config):
         self.config = config
         self.folder = folder
         self.extension = extension
@@ -31,7 +33,7 @@ class OptimizationData:
         self.optimizers = []
         if load_data:
             self._load_optimization_data()
-        for optimizer in optimizers:
+        for optimizer in optimizers or []:
             self.add_optimizer(optimizer)
 
     def steps(self, sample):
@@ -63,7 +65,7 @@ class OptimizationData:
         self._is_optimizer_loaded()
         index = self._find_sample(sample)
         return self.optimizers[index]["step_sizes"]
-    
+
     def max_fidelity(self, sample):
         self._is_optimizer_loaded()
         index = self._find_sample(sample)
@@ -87,81 +89,82 @@ class OptimizationData:
         filepath = self._generate_filepath()
         return os.path.exists(filepath)
 
-    def plot_parameters(self, basis, sample, title=False, figsize=[14,6]):
-        labels = ["".join(map(str, l)) for l in basis.labels]
-        fig, ax = plt.subplots(figsize=figsize)
+    def plot_parameters(self, basis, sample, title=False, figsize=None):
+        labels = ["".join(map(str, label)) for label in basis.labels]
+        _, ax = plt.subplots(figsize=figsize or [14, 6])
         ax.bar(labels, self.parameters(sample)[-1])
         ax.grid()
         if title:
             plt.title(title)
         plt.xticks(rotation=90)
         plt.show()
-        
-    def plot_fidelities(self, title=False, figsize=[12,6]):
-        fig, ax = plt.subplots(figsize=figsize)
-        for s in range(1,self.samples+1):
+
+    def plot_fidelities(self, title=False, figsize=None):
+        _, ax = plt.subplots(figsize=figsize or [12, 6])
+        for s in range(1, self.samples+1):
             ax.plot(self.steps(s), self.fidelities(s))
         if title:
             plt.title(title)
         plt.show()
 
-    def plot_step_sizes(self, title=False, figsize=[12,6]):
-        fig, ax = plt.subplots(figsize=figsize)
-        for s in range(1,self.samples+1):
+    def plot_step_sizes(self, title=False, figsize=None):
+        _, ax = plt.subplots(figsize=figsize or [12, 6])
+        for s in range(1, self.samples+1):
             ax.plot(self.steps(s), self.step_sizes(s))
         if title:
             plt.title(title)
         plt.show()
-        
+
     def _load_optimization_data(self):
         filepath = self._generate_filepath()
         if not os.path.isfile(filepath):
             return 0
-        dfs = pd.read_csv(filepath, 
-                         index_col=False, 
-                         )
+        dfs = pd.read_csv(filepath,
+                          index_col=False,
+                          )
         dfs.dropna(axis=0, inplace=True)
         samples = dfs["sample"].max()
         self.samples += samples
-        for sample in range(1,samples+1):
+        for sample in range(1, samples+1):
             df = dfs[dfs["sample"] == sample]
             self.optimizers.append(df.to_dict("list"))
         return self.optimizers
-    
+
     def _generate_filepath(self, name="optimization_data", extension="csv", float_precision=4):
-        config_attributes = dir(self.config)
         conf_folder = ""
-        for attr in config_attributes:
-            a = getattr(self.config, attr)
+        for attr, value in self.config.items():
+            if attr == 'name':
+                continue
+            a = value
             a = int(a) if np.isclose(int(a), a) else float(a)
-            if type(a) is int:
+            if isinstance(a, int):
                 a_str = f"m{abs(a)}" if str(a)[0] == "-" else str(a)
                 conf_folder += "_" + attr + "=" + a_str
-            elif type(a) is float:
+            elif isinstance(a, float):
                 a_str = f"m{abs(a):.{float_precision}f}" if str(a)[0] == "-" else f"{a:.{float_precision}f}"
                 conf_folder += "_" + attr + "=" + a_str
-            elif type(a) is bool:
+            elif isinstance(a, bool):
                 a_str = f"m{a}"
                 conf_folder += "_" + attr + "=" + a_str
         conf_folder = conf_folder[1:]
-        root_folder = f"{self.folder}/{str(self.config)}/{conf_folder}"
+        root_folder = f"{self.folder}/{self.config['name']}/{conf_folder}"
         directory = os.getcwd() + "/" + root_folder
         if not os.path.exists(directory):
             os.makedirs(directory)
         return root_folder + f"/{name}.{extension}"
-    
+
     def _construct_data_dict(self, optimizer):
         data_dict = {
-            "sample"     : [self.samples] * (optimizer.steps[-1]+1),
-            "steps"      : optimizer.steps,
-            "parameters" : [list(p) for p in optimizer.parameters],
-            "fidelities" : optimizer.fidelities,
-            "step_sizes" : optimizer.step_sizes,
-            }
+            "sample": [self.samples] * (optimizer.steps[-1]+1),
+            "steps": optimizer.steps,
+            "parameters": [list(p) for p in optimizer.parameters],
+            "fidelities": optimizer.fidelities,
+            "step_sizes": optimizer.step_sizes,
+        }
         return data_dict
 
     def _is_optimizer_loaded(self):
-        if self.optimizers is []:
+        if not self.optimizers:
             raise ValueError("Must use add_optimizer before you can check the parameters.")
 
     def _find_sample(self, sample):
@@ -169,3 +172,4 @@ class OptimizationData:
             if sample in dic["sample"]:
                 return i
         return -1
+

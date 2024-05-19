@@ -1,74 +1,97 @@
+# cli.py
+""" This module provides a CLI interface for using gnd. """
 import argparse
+import logging
 import numpy as np
-from gnd import basis, optimize, data
-from gnd.configs import *
+from gnd import basis, optimize, data, unitaries
+
+
+logger = logging.getLogger(__name__)
+
+
+def parse_input():
+    """ Parse arguments from stdin. """
+    parser = argparse.ArgumentParser(description='Set parameters')
+    parser.add_argument('-g', '--gate', default='cnot',
+                        choices=['cnot', 'cz', 'cphase', 'cswap', 'qft', 'wkpx', 'wkpz'],
+                        help='the target gate to compute.')
+    parser.add_argument('-d', '--dqudits', type=int, default=2,
+                        help='the dimension of qudits to use.')
+    parser.add_argument('-n', '--nqudits', type=int, default=3,
+                        help='the number of qudits, the k-parity or number of control dits will be inferred.')
+    parser.add_argument('-p', '--precision', type=float, default=0.999,
+                        help='the precision to use while optimizing.')
+    parser.add_argument('-s', '--steps', type=int, default=1000,
+                        help='the number of steps to be computed before terminating.')
+    parser.add_argument('-i', '--instance', type=int, default=3,
+                        help='used to compute the seed for generating the initial anzats.')
+    parser.add_argument('--commute', action='store_true',
+                        help='require the anzats at each step to commute.')
+    parser.add_argument('--rydberg', action='store_true',
+                        help='require the anzats at each step to be constructable from a Rydberg system.')
+    parser.add_argument('-r', '--rerun', action='store_true',
+                        help='rerun optimization for parameters even if optimization data already exists.')
+    parser.add_argument('--name',
+                        help='override the gate name for the output folder.')
+    parser.add_argument('-v', action='store_true',
+                        help='log information while running.')
+
+    return parser.parse_args()
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Set parameters')
-    parser.add_argument('--instance', default=3)
-    parser.add_argument('--gate', default='w4px')
-    parser.add_argument('--steps', default=1000)
-    parser.add_argument('--commute', default=1)
-    args = parser.parse_args()
-    max_steps = int(args.steps)
-    seed = int(args.instance) * 2 ** 8
+    """ Run optimization and process output data. """
+    args = parse_input()
     gate = args.gate
-    commute = bool(int(args.commute))
+    dqudits = args.dqudits
+    nqudits = args.nqudits
+    seed = args.instance * 2 ** 8
 
-    if gate == 'toffoli':
-        config = ToffoliConfig()
-    elif gate == 'qtf':
-        config = QFTqubitConfig()
-    elif gate == 'fredkin':
-        config = FredkinConfig()
-    elif gate == 'cccnot':
-        config = CxNotConfig(4)
-    elif gate == 'ccccnot':
-        config = CxNotConfig(5)
-    elif gate == 'cccccnot':
-        config = CxNotConfig(6)
-    elif gate == 'w2pz':
-        config = Weight2ParityZConfig()
-    elif gate == 'w2px':
-        config = Weight2ParityXConfig()
-    elif gate == 'w3pz':
-        config = Weight3ParityZConfig()
-    elif gate == 'w3px':
-        config = Weight3ParityXConfig()
-    elif gate == 'w4pz':
-        config = Weight4ParityZConfig()
-    elif gate == 'w4px':
-        config = Weight4ParityXConfig()
-    elif gate == 'w5pz':
-        config = Weight5ParityZConfig()
-    elif gate == 'w5px':
-        config = Weight5ParityXConfig()
-    elif gate == 'w6pz':
-        config = Weight6ParityZConfig()
-    elif gate == 'w6px':
-        config = Weight6ParityXConfig()
-    else:
-        raise NotImplementedError(f"{args.gate} not implemented")
-    config.seed = seed
-    config.max_steps = max_steps
-    config.commute = commute
+    # Get unitary from gnd.unitaries
+    unitary_method = getattr(unitaries, gate)
+    unitary, name = unitary_method(nqudits, dqudits)
 
-    print(f"Running {args.gate} with seed {config.seed}, {'commuting ansatz ' if commute else 'no ansatz '}"
-          f"and {max_steps} steps")
+    # Replace name if provided
+    name = args.name or name
 
-    full_basis = basis.construct_full_pauli_basis(config.nqubits)
-    projection_basis = basis.construct_two_body_pauli_basis(config.nqubits)
+    # Construct config
+    config = {
+        'precision': args.precision,
+        'max_steps': args.steps,
+        'commute': args.commute,
+        'rydberg': args.rydberg,
+        'seed': seed,
+        'name': name
+    }
+
+    # Set logging to info if running verbose
+    if args.v:
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        logger.setLevel(logging.INFO)
+        logger.addHandler(console_handler)
+
+    logger.info(f"Running {name} with seed {seed}, {'commuting ansatz ' if args.commute else 'no ansatz '}" +
+                f"and {args.steps} steps")
+
+    full_basis = basis.construct_full_pauli_basis(nqudits)
+    projection_basis = basis.construct_two_body_pauli_basis(nqudits)
 
     np.random.seed(seed)
 
-    dat = data.OptimizationData(config, load_data=False)
+    dat = data.OptimizationDataHandler(load_data=False, **config)
 
-    if dat.exists():
-        print("Data already exists, skipping...")
+    if dat.exists() and not args.rerun:
+        logger.info("Data already exists, skipping...")
     else:
-        print("Running optimization...")
-        opt = optimize.Optimizer(config.unitary, full_basis, projection_basis, max_steps=max_steps, commute=commute)
-        dat = data.OptimizationData(config, optimizers=[opt], load_data=True)
+        logger.info("Running optimization...")
+        opt = optimize.Optimizer(
+            unitary,
+            full_basis,
+            projection_basis,
+            max_steps=args.steps,
+            commute=args.commute)
+
+        dat = data.OptimizationDataHandler(optimizers=[opt], load_data=True, **config)
 
         dat.save_data()
