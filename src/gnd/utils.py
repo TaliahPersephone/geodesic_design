@@ -1,23 +1,28 @@
 # utils.py
 """ This modules contains utility functions for the gnd package. """
 from functools import reduce
+import logging
 import numpy as np
 import scipy.linalg as spla
 import sympy
-
 from gnd import lie
+
+
+logger = logging.getLogger(__name__)
 
 invphi = (np.sqrt(5) - 1) / 2  # 1 / phi
 invphi2 = (3 - np.sqrt(5)) / 2  # 1 / phi^2
 
 
 def prepare_random_parameters(proj_indices, commuting_matrix, spread=1.0):
+    """ Return randomly generated initial parameters. """
     randoms = (2 * np.random.rand(len(proj_indices)) - 1) * spread
     parameters = commuting_matrix @ np.multiply(proj_indices, randoms)
     return parameters
 
 
 def commuting_ansatz(target_unitary, basis, projected_indices):
+    """ Return free indices and commuting anzats matrix. """
     ham = -1.j * spla.logm(target_unitary)
     target_params = lie.Hamiltonian.parameters_from_hamiltonian(ham, basis)
     target_ham = lie.Hamiltonian(basis, target_params)
@@ -30,6 +35,7 @@ def commuting_ansatz(target_unitary, basis, projected_indices):
         else:
             h_mat += h_params[i] * sympy.Matrix(b)
 
+    logger.info('Calling sympy solve')
     sols = sympy.solve(h_mat * target_ham.matrix - target_ham.matrix * h_mat)
     indices = remove_solution_free_parameters(h_params, sols)
     mat = construct_commuting_ansatz_matrix(h_params, sols)
@@ -37,6 +43,8 @@ def commuting_ansatz(target_unitary, basis, projected_indices):
 
 
 def construct_commuting_ansatz_matrix(params, sols):
+    """ Construct commuting ansatz matrix given sympy solution. """
+    logger.info('Constructing commuting ansatz matrix from sympy solution')
     mat = np.zeros((len(params), len(params)))
     for j, h in enumerate(params):
         if h:
@@ -106,7 +114,7 @@ def golden_section_search(f, a, b, tol=1e-5):
             h = invphi * h
             d = a + invphi * h
             yd = f(d)
+
     if yc < yd:
         return c, yc
-    else:
-        return d, yd
+    return d, yd
