@@ -24,14 +24,16 @@ class OptimizationDataHandler:
         File extension of the saved data
     """
 
-    def __init__(self, optimizers=None, load_data=True, folder='data', extension='csv', **config):
+    def __init__(self, optimizers=None, load_data=True, load_filepath=None,
+                 folder='data', extension='csv', float_precision=4, **config):
         self.config = config
         self.folder = folder
         self.extension = extension
         self.samples = 0
         self.optimizers = []
+        self.float_precision = float_precision
         if load_data:
-            self._load_optimization_data()
+            self._load_optimization_data(load_filepath)
         for optimizer in optimizers or []:
             self.add_optimizer(optimizer)
 
@@ -59,8 +61,10 @@ class OptimizationDataHandler:
         index = self._find_sample(sample)
         fs = self.optimizers[index]['fidelities']
         running_fidelities = [fs[0]]
+        found_max = fs[0]
         for i, f in enumerate(fs[1:]):
-            fr = f if f > running_fidelities[i-1] else running_fidelities[i-1]
+            fr = f if f > found_max else found_max
+            found_max = fr
             running_fidelities.append(fr)
         return running_fidelities
 
@@ -132,9 +136,9 @@ class OptimizationDataHandler:
             plt.title(title)
         plt.show()
 
-    def _load_optimization_data(self):
+    def _load_optimization_data(self, filepath=None):
         """ Load past data for current parameter configuration. """
-        filepath = self._generate_filepath()
+        filepath = filepath or self._generate_filepath()
 
         # Return if the file does not exist
         if not os.path.isfile(filepath):
@@ -156,7 +160,7 @@ class OptimizationDataHandler:
 
         return self.optimizers
 
-    def _generate_filepath(self, filename='optimization_data', extension='csv', float_precision=4):
+    def _generate_filepath(self, filename='optimization_data', extension='csv'):
         """ Construct filename and folder from config parameters. """
         conf_folder = []
 
@@ -172,7 +176,7 @@ class OptimizationDataHandler:
 
             # Otherwise format numbers
             else:
-                float_format = f".{float_precision}f" if isinstance(value, float) else ''
+                float_format = f".{self.float_precision}f" if isinstance(value, float) else ''
                 minus_format = 'm' if value < 0 else ''
                 conf_folder += [f"{attr}={minus_format}{abs(value):{float_format}}"]
 
