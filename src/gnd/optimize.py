@@ -1,3 +1,7 @@
+# optimize.py
+""" This module contains the Optimizer class which implements the geodesic algorithm. """
+import logging
+import sys
 from jax import config
 import numpy as np
 import scipy.optimize as spo
@@ -8,6 +12,7 @@ from gnd.utils import golden_section_search, commuting_ansatz, prepare_random_pa
 
 
 config.update("jax_enable_x64", True)
+logger = logging.getLogger(__name__)
 
 
 # Roeland: One thing I recently learned is that you want to make sure that jitted functions are pure functions that
@@ -86,47 +91,60 @@ class Optimizer:
         self.max_steps = max_steps
         self.precision = precision
         self.max_step_size = max_step_size
+
         # Get the projected and free indices in the full space
-        self.projected_indices = np.array(projected_basis.overlap(full_basis), dtype=bool)
+        logger.info('Calculating projected and free indices in the full space')
+        self.proj_indices = np.array(projected_basis.overlap(full_basis), dtype=bool)
         if commute:
             self.free_indices, self.commuting_ansatz_matrix = commuting_ansatz(target_unitary, full_basis,
-                                                                               self.projected_indices)
+                                                                               self.proj_indices)
         else:
-            self.free_indices = self.projected_indices
+            self.free_indices = self.proj_indices
             self.commuting_ansatz_matrix = np.identity(len(self.free_indices))
 
         # Get the free indices within the projected space
-        indices = np.where(self.projected_indices)[0]
+        logger.info('Retrieving free indices in the projected space')
+        indices = np.where(self.proj_indices)[0]
         free_indices = np.where(self.free_indices)[0]
         locs = np.array([np.where(indices == idx)[0] for idx in free_indices])
         self.free_indices_small = np.zeros(len(indices), dtype=int)
         self.free_indices_small[locs] = 1
+
         # Get the matrix that gives us the projection parameters within the projected space
-        self.commuting_ansatz_matrix_free = self.commuting_ansatz_matrix[self.projected_indices, :][:,
-                                                                                                    self.projected_indices]
+        self.commuting_ansatz_matrix_free = self.commuting_ansatz_matrix[self.proj_indices, :][:, self.proj_indices]
+
         # Initialize variables
+        logger.info('Initializing variables')
         if init_parameters is None:
             self.init_parameters = prepare_random_parameters(self.free_indices, self.commuting_ansatz_matrix, spread=0.01)
         self.parameters = [self.init_parameters]
+
         self.fidelities = [Hamiltonian(full_basis, self.init_parameters).fidelity(target_unitary)]
         self.step_sizes = [0]
         self.steps = [0]
+
         # Get the Jax functions from the helper functions
+        logger.info('Retrieving Jax functions from helper functions')
         compute_matrix_fn = get_compute_matrix_fn(commuting_ansatz_matrix=self.commuting_ansatz_matrix_free,
                                                   basis=self.projected_basis.basis)
         project_omegas_fn = get_project_omegas_fn(self.full_basis.basis, self.full_basis.dim)
         Udagger_dU_contraction = get_Udagger_dU_contraction_fn()
         fidelity = get_fidelity_fn(self.projected_basis.basis, self.target_unitary)
+
         # Jit all the Jax functions
+        logger.info('Jitting Jax functions')
         self.jac = jax.jacobian(compute_matrix_fn, argnums=0, holomorphic=True)
         self.compute_matrix = jax.jit(compute_matrix_fn)
         self.project_omegas = jax.jit(project_omegas_fn)
         self.Udagger_dU_contractionn = jax.jit(Udagger_dU_contraction)
         self.fidelity = jax.jit(fidelity)
+
         # Start optimization
+        logger.info('Setup complete, starting optimization')
         self.is_succesful = self.optimize()
 
     def optimize(self):
+        """ Optimize fit towards target unitary. """
         step = 0
         while (self.fidelities[-1] < self.precision) and (step < self.max_steps):
             step += 1
@@ -135,22 +153,21 @@ class Optimizer:
             self.fidelities.append(fidelity)
             self.step_sizes.append(step_size)
             self.steps.append(step)
-        print("")
-        if self.fidelities[-1] >= self.precision:
-            return True
-        else:
-            return False
+
+        return self.fidelities[-1] >= self.precision
 
     def update_step(self, step_count=(None, None)):
+        """ Perform a single update step. """
         # Step 0: find the unitary from phi
         phi = self.parameters[-1]
         phi_ham = Hamiltonian(self.full_basis, phi)
         free_params = np.multiply(self.free_indices, self.parameters[-1])
+        step_str = f"[{step_count[0]}/{step_count[1]}]"
 
         # Step 1: find the geodesic between phi_U and target_V
         gamma = phi_ham.geodesic_hamiltonian(self.target_unitary)
 
-        free_params_c = free_params[self.projected_indices].astype(np.complex128)
+        free_params_c = free_params[self.proj_indices].astype(np.complex128)
 
         dU = self.jac(free_params_c)
         U_dagger = self.compute_matrix(-free_params_c)
@@ -166,10 +183,8 @@ class Optimizer:
         # Expand the coefficients
 
         if temp_coeffs is None:
-            print(
-                f"[{step_count[0]}/{step_count[1]
-                                    }] Didn't find coefficients for Omega direction; restarting...                                                    ",
-                end="\r")
+            sys.stdout.write(
+                    f"\r\x1b[2K{step_str} Didn't find coefficients for Omega direction; restarting...")
             random_parameters = prepare_random_parameters(self.free_indices, self.commuting_ansatz_matrix)
 
             new_phi_ham = Hamiltonian(self.full_basis, random_parameters)
@@ -179,25 +194,24 @@ class Optimizer:
 
         # Expand the coefficients to the larger space
         coeffs = np.zeros_like(phi_ham.parameters)
-        coeffs[self.projected_indices] = temp_coeffs
+        coeffs[self.proj_indices] = temp_coeffs
 
         # Step 4: Apply a small push in the right direction to give a new phi
-        fidelity_phi, fidelity_new_phi, new_phi_ham, step_size = self._new_phi_golden_section_search(phi_ham, coeffs,
-                                                                                                     step_size=self.max_step_size)
+        new_golden_search = self._new_phi_golden_section_search(phi_ham, coeffs, step_size=self.max_step_size)
+        fidelity_phi, fidelity_new_phi, new_phi_ham, step_size = new_golden_search
 
         if fidelity_new_phi > self.precision:
-            print(
-                f"[{step_count[0]}/{step_count[1]}] [Fidelity = {fidelity_new_phi}] A solution!                                                                     ")
-        elif (fidelity_new_phi > fidelity_phi) and not np.isclose(fidelity_new_phi, fidelity_phi, atol=(1 - self.precision) / 100):
-            print(
-                f"[{step_count[0]}/{step_count[1]
-                                    }] [Fidelity = {fidelity_new_phi}] Omega geodesic gave a positive fidelity update for this step...                 ",
-                end="\r")
+            sys.stdout.write(
+                f"\r\x1b[2K{step_str} [Fidelity = {fidelity_new_phi}] A solution!\n")
+        elif ((fidelity_new_phi > fidelity_phi) and
+              not np.isclose(fidelity_new_phi, fidelity_phi, atol=(1 - self.precision) / 100)):
+            sys.stdout.write(
+                f"\r\x1b[2K{step_str} [Fidelity = {fidelity_new_phi}] " +
+                'Omega geodesic gave a positive fidelity update for this step...')
         else:
-            print(
-                f"[{step_count[0]}/{step_count[1]
-                                    }] [Fidelity = {fidelity_phi}] Omega geodesic gave a negative fidelity update for this step. Moving phi away...    ",
-                end="\r")
+            sys.stdout.write(
+                f"\r\x1b[2K{step_str} [Fidelity = {fidelity_phi}] " +
+                'Omega geodesic gave a negative fidelity update for this step. Moving phi away...')
             proj_c = prepare_random_parameters(self.free_indices, self.commuting_ansatz_matrix)
 
             # Use the Gram-Schmidt procedure to generate a perpendicular vector to the previous coefficients.
@@ -223,18 +237,17 @@ class Optimizer:
         except ValueError as e:
             if str(e) == "Residuals are not finite in the initial point.":
                 return None
-            else:
-                raise
+            raise
 
         if not res.success:
             return None
-        else:
-            coeffs = commuting_ansatz @ expander_matrix @ res.x
+
+        coeffs = commuting_ansatz @ expander_matrix @ res.x
         return coeffs
 
     def _new_phi_golden_section_search(self, phi_ham, coeffs, step_size):
         fidelity_phi = phi_ham.fidelity(self.target_unitary)
-        def f(x): return self.fidelity(x, phi_ham.parameters[self.projected_indices], coeffs[self.projected_indices])
+        def f(x): return self.fidelity(x, phi_ham.parameters[self.proj_indices], coeffs[self.proj_indices])
         epsilon, fidelity_new_phi = golden_section_search(f, -step_size, 0, tol=1e-5)
         new_phi_ham = Hamiltonian(self.full_basis, phi_ham.parameters + (epsilon * coeffs))
         return fidelity_phi, fidelity_new_phi, new_phi_ham, epsilon
